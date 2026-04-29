@@ -1880,6 +1880,8 @@ function parseZerodhaRows(rows, filename){
     totalCharges=parseFloat((turnover*0.0012).toFixed(2));
   }
 
+}
+
 function renderUploadPreview(totalCharges, realizedPnL, period){
   const wins = uploadParsedTrades.filter(t=>t.type==='win');
   const losses = uploadParsedTrades.filter(t=>t.type==='loss');
