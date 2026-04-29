@@ -753,9 +753,24 @@ const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec
 
 /* ── Storage ── */
 function load(){
+  // Warn if in private/incognito mode (localStorage won't persist)
+  try{
+    localStorage.setItem('_test','1');
+    const ok = localStorage.getItem('_test')==='1';
+    localStorage.removeItem('_test');
+    if(!ok) showPrivateWarning();
+  }catch(e){ showPrivateWarning(); }
+  
   try{const r=localStorage.getItem(SK);if(r)trades=JSON.parse(r)}catch(e){trades=[]}
   const cap=localStorage.getItem(CK);
   if(cap)document.getElementById('capital').value=cap;
+}
+
+function showPrivateWarning(){
+  const el=document.createElement('div');
+  el.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#c0392b;color:white;text-align:center;padding:12px;font-family:Space Mono,monospace;font-size:13px;font-weight:700;';
+  el.innerHTML='⚠️ You are in Private/Incognito mode — your data will NOT be saved when you close this window. Open in a regular browser tab to save data.';
+  document.body.prepend(el);
 }
 function save(){localStorage.setItem(SK,JSON.stringify(trades))}
 function setCapital(){
@@ -1838,41 +1853,55 @@ function parseZerodhaRows(rows, filename){
     }
   }
 
-  // ── Find header row ──
+  // ── Find header row — robust multi-pass ──
   let headerIdx=-1, colMap={symbol:-1,buy:-1,sell:-1,pnl:-1};
+  
   for(let i=0;i<rows.length;i++){
-    const row=rows[i].map(c=>String(c).toLowerCase().trim());
-    const si=row.findIndex(h=>h==='symbol'||h==='scrip');
-    const bi=row.findIndex(h=>h==='buy value'||h.replace(/\s+/g,' ')=='buy value');
-    const pi=row.findIndex(h=>h.includes('realized p&l')||h.includes('realised p&l'));
-    if(si>-1&&bi>-1&&pi>-1){
-      headerIdx=i;
-      colMap.symbol=si;
-      colMap.buy=bi;
-      colMap.sell=row.findIndex(h=>h==='sell value'||h.replace(/\s+/g,' ')=='sell value');
-      colMap.pnl=pi;
-      break;
-    }
+    const raw = rows[i].map(c=>String(c).trim());
+    const row = raw.map(c=>c.toLowerCase());
+    const flat = row.join('||');
+    
+    if(!flat.includes('symbol') && !flat.includes('scrip')) continue;
+    if(!flat.includes('buy')) continue;
+    if(!flat.includes('realized') && !flat.includes('realised') && !flat.includes('p&l')) continue;
+    
+    // Found the header row — map columns
+    headerIdx = i;
+    row.forEach((h,j)=>{
+      if(h==='symbol'||h==='scrip'||h==='instrument') colMap.symbol=j;
+      else if(h==='buy value'||h==='buy_value'||h.replace(/\s+/g,'')=='buyvalue') colMap.buy=j;
+      else if(h==='sell value'||h==='sell_value'||h.replace(/\s+/g,'')=='sellvalue') colMap.sell=j;
+      else if(h.includes('realized p&l')||h.includes('realised p&l')||h==='realized p & l'||h==='realised p & l') colMap.pnl=j;
+    });
+    console.log('[TradeLog] Header row',i,':',raw);
+    console.log('[TradeLog] ColMap:',JSON.stringify(colMap));
+    break;
   }
 
-  // Fallback: detect by data pattern
-  if(headerIdx===-1){
-    for(let i=2;i<rows.length;i++){
+  // Hard fallback: Zerodha default column order
+  // Symbol(0) ISIN(1) Qty(2) BuyVal(3) SellVal(4) RealizedPnL(5)
+  if(headerIdx===-1 || colMap.pnl===-1){
+    console.log('[TradeLog] Header not found cleanly, trying positional fallback');
+    for(let i=1;i<rows.length;i++){
       const row=rows[i];
       if(!row||row.length<6) continue;
       const sym=String(row[0]||'').trim();
       const v3=parseFloat(String(row[3]||'').replace(/,/g,''));
       const v4=parseFloat(String(row[4]||'').replace(/,/g,''));
       const v5=parseFloat(String(row[5]||'').replace(/,/g,''));
-      if(sym&&sym.length>2&&!isNaN(v3)&&!isNaN(v4)&&!isNaN(v5)&&sym.toUpperCase()===sym){
+      if(sym&&sym.length>3&&!isNaN(v5)&&(v3>0||v4>0)){
         headerIdx=i-1;
         colMap={symbol:0,buy:3,sell:4,pnl:5};
+        console.log('[TradeLog] Positional fallback: data row',i,'sym:',sym,'pnl:',v5);
         break;
       }
     }
   }
 
-  if(headerIdx===-1) throw new Error('Could not find trade data. Make sure this is a Zerodha P&L Excel file.');
+  if(headerIdx===-1){
+    console.log('[TradeLog] All rows:', rows.slice(0,15));
+    throw new Error('Could not find trade data. Open browser console (Cmd+Option+J) to see the file structure.');
+  }
 
   // ── Parse trade rows ──
   const rawTrades=[];
