@@ -2078,15 +2078,17 @@ function renderUploadPreview(totalCharges, realizedPnL, period){
 }
 
 function confirmUploadImport(){
-  let existing = [];
-  try{ existing = JSON.parse(localStorage.getItem('tl_v5')||'[]'); }catch(e){}
-  const existingIds = new Set(existing.map(t=>t.id));
+  // Merge with current trades (already loaded from server into trades[])
+  const existingIds = new Set(trades.map(t=>t.id));
   const newTrades = uploadParsedTrades.filter(t=>!existingIds.has(t.id));
   
-  const combined = [...newTrades, ...existing].sort((a,b)=>new Date(b.date)-new Date(a.date));
-  localStorage.setItem('tl_v5', JSON.stringify(combined));
+  // Add to global trades array
+  trades = [...newTrades, ...trades].sort((a,b)=>new Date(b.date)-new Date(a.date));
   
-  showUploadMsg(`✅ ${newTrades.length} trade${newTrades.length!==1?'s':''} imported successfully!`, 'ok');
+  // Save to server AND localStorage
+  save();
+  
+  showUploadMsg(`✅ ${newTrades.length} trade${newTrades.length!==1?'s':''} imported!`, 'ok');
   
   const btn = document.getElementById('upload-confirm-btn');
   btn.textContent = 'Imported!';
