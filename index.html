@@ -1906,92 +1906,129 @@ function loadScript(src){
 }
 
 function parseZerodhaRows(rows, filename){
+  // ── Extract charges and realized P&L from summary rows ──
   let totalCharges=0, realizedPnL=0;
-
-  // ── Scan every row for summary values ──
   for(let i=0;i<rows.length;i++){
-    const row=rows[i].map(c=>String(c).trim());
-    for(let j=0;j<row.length;j++){
-      const cell=row[j];
-      const next=row[j+1]||'';
-      if(cell==='Charges'&&parseFloat(next)) totalCharges=parseFloat(next);
-      if((cell==='Realized P&L'||cell==='Realised P&L')&&next!=='') { const v=parseFloat(next); if(!isNaN(v)&&v!==0) realizedPnL=v; }
+    const row=rows[i].map(c=>String(c===null||c===undefined?'':c).trim());
+    for(let j=0;j<row.length-1;j++){
+      if(row[j]==='Charges' && parseFloat(row[j+1])) totalCharges=parseFloat(row[j+1]);
+      if((row[j]==='Realized P&L'||row[j]==='Realised P&L') && row[j+1]!==''){
+        const v=parseFloat(row[j+1]); if(!isNaN(v)&&v!==0) realizedPnL=v;
+      }
     }
   }
+  console.log('[TradeLog] totalCharges:',totalCharges,'realizedPnL:',realizedPnL);
 
-  // ── Find header row — robust multi-pass ──
+  // ── Find header row — look for Symbol + Buy Value + Realized P&L ──
   let headerIdx=-1, colMap={symbol:-1,buy:-1,sell:-1,pnl:-1};
-  
+
   for(let i=0;i<rows.length;i++){
-    const raw = rows[i].map(c=>String(c).trim());
-    const row = raw.map(c=>c.toLowerCase());
-    const flat = row.join('||');
-    
-    if(!flat.includes('symbol') && !flat.includes('scrip')) continue;
-    if(!flat.includes('buy')) continue;
-    if(!flat.includes('realized') && !flat.includes('realised') && !flat.includes('p&l')) continue;
-    
-    // Found the header row — map columns
-    headerIdx = i;
-    row.forEach((h,j)=>{
-      if(h==='symbol'||h==='scrip'||h==='instrument') colMap.symbol=j;
-      else if(h==='buy value'||h==='buy_value'||h.replace(/\s+/g,'')=='buyvalue') colMap.buy=j;
-      else if(h==='sell value'||h==='sell_value'||h.replace(/\s+/g,'')=='sellvalue') colMap.sell=j;
-      else if(h.includes('realized p&l')||h.includes('realised p&l')||h==='realized p & l'||h==='realised p & l') colMap.pnl=j;
-    });
-    console.log('[TradeLog] Header row',i,':',raw);
-    console.log('[TradeLog] ColMap:',JSON.stringify(colMap));
+    const row=rows[i].map(c=>String(c===null||c===undefined?'':c).toLowerCase().trim());
+    // Find Symbol column
+    const si = row.findIndex(h=>h==='symbol'||h==='scrip'||h==='instrument');
+    if(si===-1) continue;
+    // Find Buy Value column
+    const bi = row.findIndex(h=>h==='buy value'||h==='buy_value'||h.replace(/\s+/g,'')=='buyvalue');
+    if(bi===-1) continue;
+    // Find Realized P&L column
+    const pi = row.findIndex(h=>h==='realized p&l'||h==='realised p&l'||h==='p&l'||h.includes('realized p&l')||h.includes('realised p&l'));
+    if(pi===-1) continue;
+    // Find Sell Value
+    const sti = row.findIndex(h=>h==='sell value'||h==='sell_value'||h.replace(/\s+/g,'')=='sellvalue');
+
+    headerIdx=i;
+    colMap={symbol:si, buy:bi, sell:sti>-1?sti:bi+1, pnl:pi};
+    console.log('[TradeLog] Header at row',i,'cols:',JSON.stringify(colMap));
+    console.log('[TradeLog] Header row:',row);
     break;
   }
 
-  // Hard fallback: Zerodha default column order
-  // Symbol(0) ISIN(1) Qty(2) BuyVal(3) SellVal(4) RealizedPnL(5)
-  if(headerIdx===-1 || colMap.pnl===-1){
-    console.log('[TradeLog] Header not found cleanly, trying positional fallback');
-    for(let i=1;i<rows.length;i++){
+  // ── Fallback: scan for first data row where a cell looks like a ticker ──
+  if(headerIdx===-1){
+    console.log('[TradeLog] Header not found, trying positional scan...');
+    for(let i=0;i<rows.length;i++){
       const row=rows[i];
-      if(!row||row.length<6) continue;
-      const sym=String(row[0]||'').trim();
-      const v3=parseFloat(String(row[3]||'').replace(/,/g,''));
-      const v4=parseFloat(String(row[4]||'').replace(/,/g,''));
-      const v5=parseFloat(String(row[5]||'').replace(/,/g,''));
-      if(sym&&sym.length>3&&!isNaN(v5)&&(v3>0||v4>0)){
-        headerIdx=i-1;
-        colMap={symbol:0,buy:3,sell:4,pnl:5};
-        console.log('[TradeLog] Positional fallback: data row',i,'sym:',sym,'pnl:',v5);
-        break;
+      if(!row||row.length<7) continue;
+      // Try each cell as potential symbol
+      for(let j=0;j<Math.min(row.length,4);j++){
+        const sym=String(row[j]===null||row[j]===undefined?'':row[j]).trim();
+        if(!sym||sym.length<4) continue;
+        // Check if cells after it are numbers (buy value, sell value, pnl)
+        const v4=parseFloat(String(row[j+3]||'').replace(/,/g,''));
+        const v5=parseFloat(String(row[j+4]||'').replace(/,/g,''));
+        const v6=parseFloat(String(row[j+5]||'').replace(/,/g,''));
+        if(!isNaN(v4)&&v4>0&&!isNaN(v5)&&!isNaN(v6)){
+          headerIdx=i-1;
+          colMap={symbol:j, buy:j+3, sell:j+4, pnl:j+5};
+          console.log('[TradeLog] Positional fallback at row',i,'sym:',sym,'colMap:',JSON.stringify(colMap));
+          break;
+        }
       }
+      if(headerIdx>-1) break;
     }
   }
 
   if(headerIdx===-1){
-    console.log('[TradeLog] All rows:', rows.slice(0,15));
-    throw new Error('Could not find trade data. Open browser console (Cmd+Option+J) to see the file structure.');
+    console.log('[TradeLog] First 15 rows dump:');
+    rows.slice(0,15).forEach((r,i)=>console.log(i,r));
+    throw new Error('Could not find trade data. Open browser console (Cmd+Option+J) to see file structure and share with support.');
   }
 
   // ── Parse trade rows ──
   const rawTrades=[];
   for(let i=headerIdx+1;i<rows.length;i++){
     const row=rows[i];
-    if(!row||row.length<4) continue;
-    const symbol=String(row[colMap.symbol]||'').trim();
+    if(!row||row.length<=colMap.pnl) continue;
+    const symbol=String(row[colMap.symbol]===null||row[colMap.symbol]===undefined?'':row[colMap.symbol]).trim();
     if(!symbol||symbol===''||symbol.toLowerCase()==='symbol'||symbol.toLowerCase()==='scrip') continue;
-    const buy=parseFloat(String(row[colMap.buy]||'0').replace(/,/g,''))||0;
-    const sell=parseFloat(String(row[colMap.sell]||'0').replace(/,/g,''))||0;
-    const pnl=parseFloat(String(row[colMap.pnl]||'').replace(/,/g,''));
+    const buy=parseFloat(String(row[colMap.buy]===null||row[colMap.buy]===undefined?'0':row[colMap.buy]).replace(/,/g,''))||0;
+    const sell=parseFloat(String(row[colMap.sell]===null||row[colMap.sell]===undefined?'0':row[colMap.sell]).replace(/,/g,''))||0;
+    const pnlRaw=String(row[colMap.pnl]===null||row[colMap.pnl]===undefined?'':row[colMap.pnl]).replace(/,/g,'');
+    const pnl=parseFloat(pnlRaw);
     if(isNaN(pnl)) continue;
     if(buy===0&&sell===0&&pnl===0) continue;
     rawTrades.push({symbol,buy,sell,pnl});
   }
 
-  if(!rawTrades.length) throw new Error('No trades found. Check the file is a Zerodha P&L statement.');
-
-  // Fallback charges estimate
-  if(totalCharges===0){
-    const turnover=rawTrades.reduce((s,t)=>s+t.buy+t.sell,0);
-    totalCharges=parseFloat((turnover*0.0012).toFixed(2));
+  console.log('[TradeLog] Found',rawTrades.length,'trades');
+  if(!rawTrades.length){
+    console.log('[TradeLog] Sample rows after header:');
+    rows.slice(headerIdx+1,headerIdx+5).forEach((r,i)=>console.log(i,r));
+    throw new Error('No trades found after header row. Check browser console for details.');
   }
 
+  // ── Distribute charges proportionally by turnover ──
+  const totalTurnover=rawTrades.reduce((s,t)=>s+t.buy+t.sell,0);
+  if(totalCharges===0 && totalTurnover>0) totalCharges=parseFloat((totalTurnover*0.0012).toFixed(2));
+
+  const cap=getCapital()||1000000;
+  const now=new Date();
+  let baseYear=now.getFullYear(), baseMonth=now.getMonth();
+  const dm=filename.match(/(\d{4})[_\-](\d{2})/);
+  if(dm){baseYear=parseInt(dm[1]);baseMonth=parseInt(dm[2])-1;}
+  const daysInMonth=new Date(baseYear,baseMonth+1,0).getDate();
+  const step=Math.max(1,Math.floor(daysInMonth/rawTrades.length));
+
+  uploadParsedTrades=rawTrades.map((t,i)=>{
+    const charges=totalTurnover>0?parseFloat((totalCharges*(t.buy+t.sell)/totalTurnover).toFixed(2)):0;
+    const netPnl=parseFloat((t.pnl-charges).toFixed(2));
+    const type=netPnl>=0?'win':'loss';
+    const roi=parseFloat((netPnl/cap*100).toFixed(4));
+    const day=Math.min(1+i*step,daysInMonth);
+    const tradeDate=new Date(baseYear,baseMonth,day,9,15,i);
+    const sym=t.symbol.toUpperCase();
+    const market=sym.includes('FUT')?'Futures':sym.match(/\d+(CE|PE)$/)?'Options':'Stocks';
+    const noteTime=tradeDate.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    return{
+      id:tradeDate.getTime()+i,
+      date:tradeDate.toISOString(),
+      ticker:sym,market,pnl:netPnl,roi,
+      grossPnl:t.pnl,charges,type,
+      note:`[${noteTime}] Gross: ${t.pnl>=0?'+':''}${t.pnl.toFixed(2)} | Charges: -${charges.toFixed(2)} | Net: ${netPnl>=0?'+':''}${netPnl.toFixed(2)}`
+    };
+  });
+
+  renderUploadPreview(totalCharges, realizedPnL, filename);
 }
 
 function renderUploadPreview(totalCharges, realizedPnL, period){
