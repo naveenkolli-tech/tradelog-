@@ -679,21 +679,65 @@ footer{padding:20px 0;border-top:1px solid var(--border);text-align:center;font-
 </div>
 
 <script>
-const SK='tl_v5', CK='tl_cap5';
+const SK='tl_v5', CK='tl_cap5', SECK='tl_secret';
 let trades=[], stype='win', ci=null, cv='monthly', sy=new Date().getFullYear();
 const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+/* ── API client (localStorage = cache, API = source of truth) ── */
+const API_BASE='https://varies-undertake-wiley-symphony.trycloudflare.com';
+const tlapi={
+  getSecret(){
+    let s=localStorage.getItem(SECK);
+    if(!s){
+      s=prompt('Enter API secret (stored locally for future visits):');
+      if(s&&s.trim()){s=s.trim();localStorage.setItem(SECK,s);} else {return null;}
+    }
+    return s;
+  },
+  clearSecret(){localStorage.removeItem(SECK);},
+  async req(path,opts={}){
+    const sec=this.getSecret();
+    if(!sec)throw new Error('no-secret');
+    const headers=Object.assign({'Content-Type':'application/json','X-Auth-Secret':sec},opts.headers||{});
+    const r=await fetch(API_BASE+path,Object.assign({},opts,{headers}));
+    if(r.status===401){this.clearSecret();throw new Error('unauthorized');}
+    if(!r.ok)throw new Error('http-'+r.status);
+    return r.json();
+  },
+  getTrades(){return this.req('/trades');},
+  postTrade(t){return this.req('/trades',{method:'POST',body:JSON.stringify(t)});},
+  deleteTrade(id){return this.req('/trades/'+encodeURIComponent(id),{method:'DELETE'});},
+  getCapitalRemote(){return this.req('/capital');},
+  setCapitalRemote(v){return this.req('/capital',{method:'POST',body:JSON.stringify({capital:v})});},
+};
 
 /* ── Storage ── */
 function load(){
   try{const r=localStorage.getItem(SK);if(r)trades=JSON.parse(r)}catch(e){trades=[]}
   const cap=localStorage.getItem(CK);
   if(cap)document.getElementById('capital').value=cap;
+  syncFromApi();
+}
+async function syncFromApi(){
+  try{
+    const [apiTrades,apiCap]=await Promise.all([tlapi.getTrades(),tlapi.getCapitalRemote()]);
+    if(Array.isArray(apiTrades)){trades=apiTrades;localStorage.setItem(SK,JSON.stringify(trades));}
+    if(apiCap&&apiCap.capital!==null&&apiCap.capital!==undefined){
+      localStorage.setItem(CK,apiCap.capital);
+      const inp=document.getElementById('capital');if(inp)inp.value=apiCap.capital;
+    }
+    renderAll();
+    console.log('[tradelog] synced:',trades.length,'trades from API');
+  }catch(e){
+    console.warn('[tradelog] API sync failed, using localStorage cache:',e.message);
+  }
 }
 function save(){localStorage.setItem(SK,JSON.stringify(trades))}
 function setCapital(){
   const v=parseFloat(document.getElementById('capital').value);
   if(isNaN(v)||v<=0){alert('Enter a valid capital amount');return}
   localStorage.setItem(CK,v);
+  tlapi.setCapitalRemote(v).catch(e=>console.warn('[tradelog] capital API write failed:',e.message));
   renderAll();
 }
 function getCapital(){
@@ -843,6 +887,7 @@ function addTrade(){
     type:stype
   });
   save();
+  tlapi.postTrade(trades[0]).catch(e=>console.warn('[tradelog] trade POST failed:',e.message));
   ['ticker','pnl','note'].forEach(i=>document.getElementById(i).value='');
   document.getElementById('rp-val').textContent='—';
   document.getElementById('rp-val').className='rp-val';
@@ -871,9 +916,11 @@ function delTrade(id){
 
 function confirmDelete(){
   if(!pendingDeleteId)return;
-  trades=trades.filter(t=>t.id!==pendingDeleteId);
+  const delId=pendingDeleteId;
+  trades=trades.filter(t=>t.id!==delId);
   pendingDeleteId=null;
   save();
+  tlapi.deleteTrade(delId).catch(e=>console.warn('[tradelog] trade DELETE failed:',e.message));
   closeModal();
   renderAll();
 }
