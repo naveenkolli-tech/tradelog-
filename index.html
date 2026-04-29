@@ -1759,37 +1759,54 @@ async function processUploadFile(file){
     } else if(ext === 'csv'){
       await parseZerodhaCSV(file);
     } else {
-      throw new Error('Unsupported file type. Please upload a .xlsx or .csv file.');
+      throw new Error('Unsupported file type. Please upload a .xlsx or .csv file from Zerodha.');
     }
   } catch(err){
+    console.error('Upload error:', err);
     setProgress(0);
     document.getElementById('upload-drop-zone').style.display='';
     document.getElementById('upload-progress').classList.remove('show');
-    showUploadMsg('❌ ' + err.message, 'err');
     document.getElementById('upload-preview').classList.add('show');
+    showUploadMsg('❌ ' + (err.message||'Unknown error. Check browser console for details.'), 'err');
   }
 }
 
 async function parseZerodhaXLSX(file){
-  // Load SheetJS from CDN
-  if(!window.XLSX){
-    setProgress(30);
-    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+  try{
+    // Load SheetJS from CDN with timeout
+    if(!window.XLSX){
+      setProgress(30);
+      showUploadMsg('Loading Excel reader...', 'warn');
+      document.getElementById('upload-preview').classList.add('show');
+      try{
+        await Promise.race([
+          loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'),
+          new Promise((_,rej)=>setTimeout(()=>rej(new Error('CDN timeout after 10s')),10000))
+        ]);
+      } catch(e){
+        throw new Error('Could not load Excel reader. Check your internet connection and try again.');
+      }
+    }
+    setProgress(50);
+    showUploadMsg('Reading file...', 'warn');
+
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    setProgress(70);
+
+    // Find the F&O/Equity sheet or first sheet
+    let sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('f&o') || n.toLowerCase().includes('fo') || n.toLowerCase().includes('equity'));
+    if(!sheetName) sheetName = wb.SheetNames[0];
+    
+    showUploadMsg('Parsing trades from sheet: ' + sheetName + '...', 'warn');
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+
+    setProgress(90);
+    parseZerodhaRows(rows, file.name);
+  } catch(e){
+    throw e;
   }
-  setProgress(50);
-
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, {type:'array'});
-  setProgress(70);
-
-  // Find the F&O sheet or first sheet
-  let sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('f&o') || n.toLowerCase().includes('fo') || n.toLowerCase().includes('equity'));
-  if(!sheetName) sheetName = wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
-
-  setProgress(80);
-  parseZerodhaRows(rows, file.name);
 }
 
 async function parseZerodhaCSV(file){
