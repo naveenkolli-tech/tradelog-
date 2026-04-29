@@ -421,7 +421,11 @@ footer{padding:20px 0;border-top:1px solid var(--border);text-align:center;font-
         <div class="lmark"><svg viewBox="0 0 24 24"><path d="M3 17l4-8 4 4 4-6 4 10H3z"/></svg></div>
         <div class="ltxt"><h1>TradeLog</h1><p>Personal Trading Journal</p></div>
       </div>
-      <div class="hdate" id="ldate"></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span id="sync-badge" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)">⏳ Connecting...</span>
+        <button onclick="showServerSetup()" style="font-family:'Space Mono',monospace;font-size:10px;background:var(--card);border:1px solid var(--border2);color:var(--muted2);padding:6px 12px;border-radius:100px;cursor:pointer;letter-spacing:.5px">⚙ SERVER</button>
+        <div class="hdate" id="ldate"></div>
+      </div>
     </div>
   </header>
 
@@ -747,43 +751,105 @@ footer{padding:20px 0;border-top:1px solid var(--border);text-align:center;font-
 </div>
 
 <script>
-const SK='tl_v5', CK='tl_cap5';
+const SK='tl_v5', CK='tl_cap5', SECRET_KEY='tl_secret';
 let trades=[], stype='win', ci=null, cv='monthly', sy=new Date().getFullYear();
 const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-/* ── Storage ── */
-function load(){
-  // Warn if in private/incognito mode (localStorage won't persist)
+/* ══ SERVER SYNC ══ */
+let API_URL = localStorage.getItem('tl_api_url')||'';
+let API_SECRET = localStorage.getItem(SECRET_KEY)||'';
+let syncStatus = 'unknown';
+
+function getApiHeaders(){return{'Content-Type':'application/json','X-Auth-Secret':API_SECRET};}
+
+async function serverLoad(){
+  if(!API_URL||!API_SECRET){syncStatus='local';updateSyncBadge();return false;}
   try{
-    localStorage.setItem('_test','1');
-    const ok = localStorage.getItem('_test')==='1';
-    localStorage.removeItem('_test');
-    if(!ok) showPrivateWarning();
-  }catch(e){ showPrivateWarning(); }
-  
-  try{const r=localStorage.getItem(SK);if(r)trades=JSON.parse(r)}catch(e){trades=[]}
+    const [tr,cap]=await Promise.all([
+      fetch(API_URL+'/trades',{headers:getApiHeaders()}),
+      fetch(API_URL+'/capital',{headers:getApiHeaders()})
+    ]);
+    if(!tr.ok||!cap.ok){syncStatus='offline';updateSyncBadge();return false;}
+    const trData=await tr.json();
+    const capData=await cap.json();
+    trades=Array.isArray(trData)?trData:[];
+    const capVal=capData&&capData.value?capData.value:null;
+    localStorage.setItem(SK,JSON.stringify(trades));
+    if(capVal){localStorage.setItem(CK,capVal);document.getElementById('capital').value=capVal;}
+    syncStatus='online';updateSyncBadge();return true;
+  }catch(e){syncStatus='offline';updateSyncBadge();return false;}
+}
+
+async function serverSaveTrades(){
+  localStorage.setItem(SK,JSON.stringify(trades));
+  if(!API_URL||!API_SECRET)return;
+  try{await fetch(API_URL+'/trades',{method:'POST',headers:getApiHeaders(),body:JSON.stringify(trades)});syncStatus='online';}
+  catch(e){syncStatus='offline';}
+  updateSyncBadge();
+}
+
+async function serverSaveCapital(val){
+  localStorage.setItem(CK,val);
+  if(!API_URL||!API_SECRET)return;
+  try{await fetch(API_URL+'/capital',{method:'POST',headers:getApiHeaders(),body:JSON.stringify({value:val})});syncStatus='online';}
+  catch(e){syncStatus='offline';}
+  updateSyncBadge();
+}
+
+function updateSyncBadge(){
+  const el=document.getElementById('sync-badge');
+  if(!el)return;
+  const map={local:'⚡ Local only',online:'🟢 Synced to server',offline:'🔴 Offline — using local cache',unknown:'⏳ Connecting...'};
+  const col={local:'var(--muted)',online:'var(--green)',offline:'var(--red)',unknown:'var(--gold)'};
+  el.textContent=map[syncStatus]||map.unknown;
+  el.style.color=col[syncStatus]||col.unknown;
+}
+
+function showServerSetup(){
+  const url=prompt('Server URL (e.g. https://varies-undertake-wiley-symphony.trycloudflare.com)\nLeave blank for local only:');
+  if(url===null)return;
+  if(url.trim()===''){
+    localStorage.removeItem('tl_api_url');localStorage.removeItem(SECRET_KEY);
+    API_URL='';API_SECRET='';updateSyncBadge();
+    alert('Switched to local storage only.');return;
+  }
+  const secret=prompt('API secret (tradelog-secret-2024):');
+  if(!secret){alert('Secret required');return;}
+  API_URL=url.trim().replace(/\/$/,'');
+  API_SECRET=secret.trim();
+  localStorage.setItem('tl_api_url',API_URL);
+  localStorage.setItem(SECRET_KEY,API_SECRET);
+  updateSyncBadge();
+  initApp();
+}
+
+/* ── Storage ── */
+async function initApp(){
+  const fromServer=await serverLoad();
+  if(!fromServer){
+    try{const r=localStorage.getItem(SK);if(r)trades=JSON.parse(r);}catch(e){trades=[];}
+    const cap=localStorage.getItem(CK);
+    if(cap)document.getElementById('capital').value=cap;
+  }
+  renderAll();
+}
+
+function load(){
+  try{const r=localStorage.getItem(SK);if(r)trades=JSON.parse(r);}catch(e){trades=[];}
   const cap=localStorage.getItem(CK);
   if(cap)document.getElementById('capital').value=cap;
 }
 
-function showPrivateWarning(){
-  const el=document.createElement('div');
-  el.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#c0392b;color:white;text-align:center;padding:12px;font-family:Space Mono,monospace;font-size:13px;font-weight:700;';
-  el.innerHTML='⚠️ You are in Private/Incognito mode — your data will NOT be saved when you close this window. Open in a regular browser tab to save data.';
-  document.body.prepend(el);
-}
-function save(){localStorage.setItem(SK,JSON.stringify(trades))}
+function save(){serverSaveTrades();}
 function setCapital(){
   const v=parseFloat(document.getElementById('capital').value);
-  if(isNaN(v)||v<=0){alert('Enter a valid capital amount');return}
-  localStorage.setItem(CK,v);
-  renderAll();
+  if(isNaN(v)||v<=0){alert('Enter a valid capital amount');return;}
+  serverSaveCapital(v);renderAll();
 }
 function getCapital(){
   const v=parseFloat(localStorage.getItem(CK));
   return isNaN(v)||v<=0?null:v;
 }
-
 /* ── Helpers ── */
 function fnum(n,always=false){
   if(n===null||n===undefined)return'—';
@@ -2000,7 +2066,7 @@ function htt(){document.getElementById('tt').style.opacity='0'}
 function renderAll(){renderMaster();renderSummary();renderTrades();renderMonthly();renderChart();renderHeatmap();renderBottom();renderWarning();renderPrediction();document.getElementById('ftc').textContent=`${trades.length} trade${trades.length!==1?'s':''} logged`}
 
 document.getElementById('ldate').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
-load();loadGoal();renderAll();
+load();loadGoal();initApp();
 </script>
 </body>
 </html>
