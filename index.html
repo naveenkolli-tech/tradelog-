@@ -2004,8 +2004,29 @@ function parseZerodhaRows(rows, filename){
   const cap=getCapital()||1000000;
   const now=new Date();
   let baseYear=now.getFullYear(), baseMonth=now.getMonth();
-  const dm=filename.match(/(\d{4})[_\-](\d{2})/);
-  if(dm){baseYear=parseInt(dm[1]);baseMonth=parseInt(dm[2])-1;}
+  
+  // First try to find date range inside the Excel rows (most reliable)
+  // Zerodha puts: "P&L Statement for F&O from 2026-04-01 to 2026-04-29"
+  for(let i=0;i<Math.min(rows.length,20);i++){
+    const row=rows[i].map(c=>String(c===null||c===undefined?'':c).trim());
+    for(let j=0;j<row.length;j++){
+      const cell=row[j];
+      // Match "from YYYY-MM-DD" pattern
+      const m=cell.match(/from\s+(\d{4})-(\d{2})-(\d{2})/i);
+      if(m){
+        baseYear=parseInt(m[1]);
+        baseMonth=parseInt(m[2])-1;
+        console.log('[TradeLog] Date from Excel header:',baseYear,baseMonth+1);
+        break;
+      }
+    }
+  }
+  
+  // Fallback: try filename pattern like 2026-04 or Apr-2026
+  if(baseYear===now.getFullYear()&&baseMonth===now.getMonth()){
+    const dm=filename.match(/(\d{4})[_\-](\d{2})/);
+    if(dm){baseYear=parseInt(dm[1]);baseMonth=parseInt(dm[2])-1;}
+  }
   const daysInMonth=new Date(baseYear,baseMonth+1,0).getDate();
   const step=Math.max(1,Math.floor(daysInMonth/rawTrades.length));
 
