@@ -422,8 +422,9 @@ footer{padding:20px 0;border-top:1px solid var(--border);text-align:center;font-
         <div class="ltxt"><h1>TradeLog</h1><p>Personal Trading Journal</p></div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span id="sync-badge" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)">⏳ Connecting...</span>
+        <span id="sync-badge" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)">⚡ Local only</span>
         <button onclick="showServerSetup()" style="font-family:'Space Mono',monospace;font-size:10px;background:var(--card);border:1px solid var(--border2);color:var(--muted2);padding:6px 12px;border-radius:100px;cursor:pointer;letter-spacing:.5px">⚙ SERVER</button>
+        <button onclick="downloadApp()" style="font-family:'Space Mono',monospace;font-size:10px;background:linear-gradient(135deg,var(--accent),var(--blue));border:none;color:white;padding:6px 14px;border-radius:100px;cursor:pointer;letter-spacing:.5px;font-weight:700">⬇ DOWNLOAD REPORT</button>
         <div class="hdate" id="ldate"></div>
       </div>
     </div>
@@ -526,7 +527,7 @@ footer{padding:20px 0;border-top:1px solid var(--border);text-align:center;font-
             <thead>
               <tr>
                 <th>Month</th><th>Trades</th><th>W</th><th>L</th>
-                <th>P&amp;L</th><th>Month ROI%</th><th>Running %</th><th>End Balance</th><th>Bar</th>
+                <th>Gross P&amp;L</th><th>Charges</th><th>Net P&amp;L</th><th>Month ROI%</th><th>Running %</th><th>End Balance</th><th>Bar</th>
               </tr>
             </thead>
             <tbody id="mtbody"></tbody>
@@ -619,9 +620,12 @@ footer{padding:20px 0;border-top:1px solid var(--border);text-align:center;font-
 
   <!-- TRADE HISTORY -->
   <div class="trsec">
-    <div class="trh">
-      <span class="ptitle">Trade History</span>
-      <div style="display:flex;gap:6px">
+    <div class="trh" style="flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="ptitle">Trade History</span>
+        <button id="tr-toggle-btn" onclick="toggleTradeHistory()" style="font-family:'Space Mono',monospace;font-size:10px;background:var(--bg3);border:1px solid var(--border2);color:var(--muted2);padding:4px 12px;border-radius:100px;cursor:pointer;letter-spacing:.5px">▼ EXPAND</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <select id="ftype" onchange="renderTrades()" style="font-size:11px;padding:4px 10px;border-radius:100px">
           <option value="">All</option><option value="win">Wins</option><option value="loss">Losses</option>
         </select>
@@ -629,16 +633,24 @@ footer{padding:20px 0;border-top:1px solid var(--border);text-align:center;font-
           <option value="">All Markets</option>
           <option>Crypto</option><option>Forex</option><option>Stocks</option><option>Futures</option><option>Options</option>
         </select>
+        <input type="number" id="fmin" placeholder="Min P&L" oninput="renderTrades()" style="font-size:11px;padding:4px 10px;border-radius:100px;width:100px;background:var(--bg2);border:1px solid var(--border2);color:var(--text)"/>
+        <input type="number" id="fmax" placeholder="Max P&L" oninput="renderTrades()" style="font-size:11px;padding:4px 10px;border-radius:100px;width:100px;background:var(--bg2);border:1px solid var(--border2);color:var(--text)"/>
+        <input type="date" id="ffrom" onchange="renderTrades()" style="font-size:11px;padding:4px 10px;border-radius:100px;background:var(--bg2);border:1px solid var(--border2);color:var(--text)"/>
+        <input type="date" id="fto" onchange="renderTrades()" style="font-size:11px;padding:4px 10px;border-radius:100px;background:var(--bg2);border:1px solid var(--border2);color:var(--text)"/>
+        <button onclick="resetTradeFilters()" style="font-size:11px;padding:4px 12px;border-radius:100px;background:var(--bg3);border:1px solid var(--border2);color:var(--muted2);cursor:pointer">✕ Reset</button>
+        <button onclick="downloadTradeReport()" style="font-size:11px;padding:4px 14px;border-radius:100px;background:linear-gradient(135deg,var(--green),rgba(0,214,143,0.7));border:none;color:#000;font-family:'Space Mono',monospace;font-weight:700;cursor:pointer;letter-spacing:.3px">⬇ CSV</button>
       </div>
     </div>
-    <div style="overflow-x:auto">
+    <div id="tr-body-wrap" style="display:none;overflow-x:auto">
       <table class="trtbl">
         <thead>
-          <tr><th>Date</th><th>Ticker</th><th>Market</th><th>P&amp;L</th><th>ROI%</th><th>Balance After</th><th>Result</th><th>Note</th><th></th></tr>
+          <tr><th>Date</th><th>Ticker</th><th>Market</th><th>Gross P&L</th><th>Charges</th><th>Net P&L</th><th>ROI%</th><th>Balance After</th><th>Result</th><th>Note</th><th></th></tr>
         </thead>
         <tbody id="trbody"></tbody>
       </table>
+      <div id="tr-pagination" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-top:1px solid var(--border)"></div>
     </div>
+    <div id="tr-summary" style="padding:10px 14px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);font-family:'Space Mono',monospace"></div>
   </div>
 
 
@@ -781,10 +793,13 @@ async function serverLoad(){
 }
 
 async function serverSaveTrades(){
-  localStorage.setItem(SK,JSON.stringify(trades));
-  if(!API_URL||!API_SECRET)return;
-  try{await fetch(API_URL+'/trades',{method:'POST',headers:getApiHeaders(),body:JSON.stringify(trades)});syncStatus='online';}
-  catch(e){syncStatus='offline';}
+  // Always write localStorage first — synchronous, instant, ground truth
+  localStorage.setItem(SK, JSON.stringify(trades));
+  if(!API_URL||!API_SECRET) return;
+  try{
+    await fetch(API_URL+'/trades',{method:'POST',headers:getApiHeaders(),body:JSON.stringify(trades)});
+    syncStatus='online';
+  } catch(e){ syncStatus='offline'; }
   updateSyncBadge();
 }
 
@@ -799,10 +814,15 @@ async function serverSaveCapital(val){
 function updateSyncBadge(){
   const el=document.getElementById('sync-badge');
   if(!el)return;
-  const map={local:'⚡ Local only',online:'🟢 Synced to server',offline:'🔴 Offline — using local cache',unknown:'⏳ Connecting...'};
-  const col={local:'var(--muted)',online:'var(--green)',offline:'var(--red)',unknown:'var(--gold)'};
-  el.textContent=map[syncStatus]||map.unknown;
-  el.style.color=col[syncStatus]||col.unknown;
+  const map={
+    local:'⚡ Local only',
+    online:'🟢 Synced',
+    offline:'🔴 Server offline — local only',
+    unknown:'⚡ Local only'
+  };
+  const col={local:'var(--muted)',online:'var(--green)',offline:'var(--gold)',unknown:'var(--muted)'};
+  el.textContent=map[syncStatus]||map.local;
+  el.style.color=col[syncStatus]||col.local;
 }
 
 function showServerSetup(){
@@ -825,13 +845,47 @@ function showServerSetup(){
 
 /* ── Storage ── */
 async function initApp(){
-  const fromServer=await serverLoad();
-  if(!fromServer){
-    try{const r=localStorage.getItem(SK);if(r)trades=JSON.parse(r);}catch(e){trades=[];}
-    const cap=localStorage.getItem(CK);
-    if(cap)document.getElementById('capital').value=cap;
+  // Step 1: Load from localStorage immediately — no waiting
+  try{const r=localStorage.getItem(SK);if(r)trades=JSON.parse(r);}catch(e){trades=[];}
+  const cap=localStorage.getItem(CK);
+  if(cap)document.getElementById('capital').value=cap;
+
+  // Step 2: Set badge to local immediately so it never shows "Connecting..." forever
+  if(!API_URL||!API_SECRET){
+    syncStatus='local'; updateSyncBadge(); renderAll(); return;
   }
+
+  // Step 3: Render now, then try server in background with a hard 5s timeout
   renderAll();
+  try{
+    const timeout = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000));
+    const [tr,capR]=await Promise.race([
+      Promise.all([
+        fetch(API_URL+'/trades',{headers:getApiHeaders()}),
+        fetch(API_URL+'/capital',{headers:getApiHeaders()})
+      ]),
+      timeout.then(()=>{throw new Error('timeout');})
+    ]);
+    if(tr.ok&&capR.ok){
+      const serverTrades=await tr.json();
+      const serverCap=await capR.json();
+      // Only use server data if local is empty (fresh device)
+      if(trades.length===0&&Array.isArray(serverTrades)&&serverTrades.length>0){
+        trades=serverTrades;
+        if(serverCap&&serverCap.value){localStorage.setItem(CK,serverCap.value);document.getElementById('capital').value=serverCap.value;}
+        localStorage.setItem(SK,JSON.stringify(trades));
+        renderAll();
+      }
+      syncStatus='online';
+    } else { syncStatus='offline'; }
+  } catch(e){
+    syncStatus='offline';
+    // Server is dead — clear the stored URL so we don't keep retrying
+    if(e.message==='timeout'||e.message==='Failed to fetch'){
+      console.warn('[TradeLog] Server unreachable, switching to local-only mode');
+    }
+  }
+  updateSyncBadge();
 }
 
 function load(){
@@ -926,11 +980,15 @@ function renderMaster(){
   // Breakdown bar
   const totalWins=trades.filter(t=>t.type==='win').reduce((s,t)=>s+t.pnl,0);
   const totalLosses=Math.abs(trades.filter(t=>t.type==='loss').reduce((s,t)=>s+t.pnl,0));
+  const totalChargesAll=trades.reduce((s,t)=>s+(t.charges||0),0);
+  const grossPnL=trades.reduce((s,t)=>s+(t.grossPnl||t.pnl),0);
   document.getElementById('master-breakdown').innerHTML=`
     <div class="mb-item"><div class="mb-label">Starting Capital</div><div class="mb-val neu">${cap?fbal(cap):'—'}</div></div>
     <div class="mb-item"><div class="mb-label">Total Profit</div><div class="mb-val pos">${totalWins?'+'+totalWins.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'0.00'}</div></div>
     <div class="mb-item"><div class="mb-label">Total Loss</div><div class="mb-val neg">${totalLosses?'-'+totalLosses.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'0.00'}</div></div>
-    <div class="mb-item"><div class="mb-label">Net P&L</div><div class="mb-val ${totalPL>=0?'pos':'neg'}">${fnum(totalPL)}</div></div>
+    <div class="mb-item" title="Gross P&L before charges"><div class="mb-label">Gross P&L</div><div class="mb-val ${grossPnL>=0?'pos':'neg'}">${grossPnL>=0?'+':''}${grossPnL.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
+    <div class="mb-item" title="Brokerage + STT + Exchange charges"><div class="mb-label">Total Charges</div><div class="mb-val neg">${totalChargesAll>0?'-'+totalChargesAll.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</div></div>
+    <div class="mb-item" title="Net P&L after all charges — your take-home"><div class="mb-label">Net P&L ✓</div><div class="mb-val ${totalPL>=0?'pos':'neg'}">${fnum(totalPL)}</div></div>
     <div class="mb-item"><div class="mb-label">Live Balance</div><div class="mb-val ${balance>=cap?'pos':'neg'}">${cap?fbal(balance):'—'}</div></div>
     <div class="mb-item"><div class="mb-label">Total ROI</div><div class="mb-val ${roi>=0?'pos':'neg'}">${cap?fp(roi):'—'}</div></div>
   `;
@@ -1042,36 +1100,140 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ── Trade history table ── */
-function renderTrades(){
+let tradeHistoryOpen=false;
+let tradePage=0;
+const TR_PER_PAGE=10;
+
+function toggleTradeHistory(){
+  tradeHistoryOpen=!tradeHistoryOpen;
+  document.getElementById('tr-body-wrap').style.display=tradeHistoryOpen?'':'none';
+  document.getElementById('tr-toggle-btn').textContent=tradeHistoryOpen?'▲ COLLAPSE':'▼ EXPAND';
+  if(tradeHistoryOpen) renderTrades();
+}
+
+function resetTradeFilters(){
+  document.getElementById('ftype').value='';
+  document.getElementById('fmkt').value='';
+  document.getElementById('fmin').value='';
+  document.getElementById('fmax').value='';
+  document.getElementById('ffrom').value='';
+  document.getElementById('fto').value='';
+  tradePage=0;
+  renderTrades();
+}
+
+function downloadTradeReport(){
   const ft=document.getElementById('ftype').value;
   const fm=document.getElementById('fmkt').value;
+  const fmin=parseFloat(document.getElementById('fmin').value);
+  const fmax=parseFloat(document.getElementById('fmax').value);
+  const ffrom=document.getElementById('ffrom').value;
+  const fto=document.getElementById('fto').value;
+  let list=[...trades].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(ft) list=list.filter(t=>t.type===ft);
+  if(fm) list=list.filter(t=>t.market===fm);
+  if(!isNaN(fmin)) list=list.filter(t=>t.pnl>=fmin);
+  if(!isNaN(fmax)) list=list.filter(t=>t.pnl<=fmax);
+  if(ffrom) list=list.filter(t=>t.date.slice(0,10)>=ffrom);
+  if(fto)   list=list.filter(t=>t.date.slice(0,10)<=fto);
+
+  const rows=[['Date','Ticker','Market','Gross P&L','Charges','Net P&L','ROI%','Result','Note']];
+  list.forEach(t=>{
+    rows.push([
+      t.date.slice(0,10),
+      t.ticker,
+      t.market,
+      (t.grossPnl||t.pnl).toFixed(2),
+      (t.charges||0).toFixed(2),
+      t.pnl.toFixed(2),
+      (t.roi||0).toFixed(4)+'%',
+      t.type.toUpperCase(),
+      (t.note||'').replace(/,/g,' ')
+    ]);
+  });
+  const csv=rows.map(r=>r.join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  const today=new Date().toISOString().slice(0,10);
+  a.download=`tradelog-trades-${today}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function renderTrades(resetPage){
+  if(resetPage) tradePage=0;
+  const ft=document.getElementById('ftype').value;
+  const fm=document.getElementById('fmkt').value;
+  const fmin=parseFloat(document.getElementById('fmin').value);
+  const fmax=parseFloat(document.getElementById('fmax').value);
+  const ffrom=document.getElementById('ffrom').value;
+  const fto=document.getElementById('fto').value;
   let list=trades;
-  if(ft)list=list.filter(t=>t.type===ft);
-  if(fm)list=list.filter(t=>t.market===fm);
+  if(ft) list=list.filter(t=>t.type===ft);
+  if(fm) list=list.filter(t=>t.market===fm);
+  if(!isNaN(fmin)) list=list.filter(t=>t.pnl>=fmin);
+  if(!isNaN(fmax)) list=list.filter(t=>t.pnl<=fmax);
+  if(ffrom) list=list.filter(t=>t.date.slice(0,10)>=ffrom);
+  if(fto)   list=list.filter(t=>t.date.slice(0,10)<=fto);
+
+  // Summary always visible regardless of expand state
+  const netTotal=list.reduce((s,t)=>s+t.pnl,0);
+  const wins=list.filter(t=>t.type==='win').length;
+  const charges=list.reduce((s,t)=>s+(t.charges||0),0);
+  document.getElementById('tr-summary').innerHTML=
+    `<b>${list.length}</b> trade${list.length!==1?'s':''} &nbsp;·&nbsp; `+
+    `<b style="color:var(--green)">${wins}W</b> / <b style="color:var(--red)">${list.length-wins}L</b> &nbsp;·&nbsp; `+
+    `Charges: <b style="color:var(--red)">-${charges.toFixed(2)}</b> &nbsp;·&nbsp; `+
+    `Net: <b style="color:${netTotal>=0?'var(--green)':'var(--red)'}">${fnum(netTotal)}</b>`;
+
+  if(!tradeHistoryOpen) return;
+
   const bmap=buildBalanceMap();
   const tb=document.getElementById('trbody');
-  if(!list.length){tb.innerHTML='<tr><td colspan="9"><div class="empty">No trades logged yet. Use the form to log your first trade!</div></td></tr>';return}
-  tb.innerHTML=list.map((t,i)=>`
-    <tr class="${t.type==='win'?'twin':'tloss'}${i===0?' nr':''}">
+  if(!list.length){
+    tb.innerHTML='<tr><td colspan="11"><div class="empty">No trades match the filters.</div></td></tr>';
+    document.getElementById('tr-pagination').innerHTML='';
+    return;
+  }
+
+  // Clamp page
+  const totalPages=Math.ceil(list.length/TR_PER_PAGE);
+  if(tradePage>=totalPages) tradePage=totalPages-1;
+  const page=list.slice(tradePage*TR_PER_PAGE,(tradePage+1)*TR_PER_PAGE);
+
+  tb.innerHTML=page.map((t,i)=>`
+    <tr class="${t.type==='win'?'twin':'tloss'}">
       <td style="font-family:'Space Mono',monospace;font-size:10px;color:var(--muted2)">${fdt(t.date)}</td>
       <td style="font-weight:600;font-size:13px">${t.ticker}</td>
       <td style="font-size:11px;color:var(--muted2)">${t.market}</td>
-      <td class="${t.pnl>=0?'pp':'pn'}">${fnum(t.pnl)}</td>
+      <td class="${(t.grossPnl||t.pnl)>=0?'pp':'pn'}" style="font-size:11px">${fnum(t.grossPnl||t.pnl)}</td>
+      <td style="font-family:'Space Mono',monospace;font-size:11px;color:var(--red)">${t.charges?'-'+t.charges.toFixed(2):'—'}</td>
+      <td class="${t.pnl>=0?'pp':'pn'}" style="font-weight:700">${fnum(t.pnl)}</td>
       <td class="${t.roi>=0?'pp':'pn'}" style="font-family:'Space Mono',monospace;font-size:11px">${fp(t.roi)}</td>
       <td style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)">${bmap[t.id]?fbal(bmap[t.id]):'—'}</td>
       <td><span class="badge ${t.type==='win'?'bw':'bl'}">${t.type.toUpperCase()}</span></td>
       <td><div class="tnote" title="${t.note}">${t.note||'—'}</div></td>
       <td><button class="delbtn" onclick="delTrade(${t.id})">Delete</button></td>
     </tr>`).join('');
+
+  // Pagination controls
+  const pgBtn=(label,page,disabled)=>
+    `<button onclick="tradePage=${page};renderTrades()" style="font-family:'Space Mono',monospace;font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid var(--border2);background:${disabled?'var(--bg3)':'var(--card)'};color:${disabled?'var(--muted)':'var(--text)'};cursor:${disabled?'default':'pointer'}" ${disabled?'disabled':''}>${label}</button>`;
+  document.getElementById('tr-pagination').innerHTML=
+    pgBtn('◀ Prev', tradePage-1, tradePage===0)+
+    `<span style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)">Page ${tradePage+1} of ${totalPages} &nbsp;(${list.length} trades)</span>`+
+    pgBtn('Next ▶', tradePage+1, tradePage>=totalPages-1);
 }
 
 /* ── Monthly table ── */
 function getMD(year){
-  const cap=getCapital();
   return Array.from({length:12},(_,m)=>{
     const mt=trades.filter(t=>{const d=new Date(t.date);return d.getFullYear()===year&&d.getMonth()===m});
     const pnl=mt.reduce((s,t)=>s+t.pnl,0);
-    return{m,n:mt.length,pnl,w:mt.filter(t=>t.type==='win').length,l:mt.filter(t=>t.type==='loss').length};
+    const charges=mt.reduce((s,t)=>s+(t.charges||0),0);
+    const gross=mt.reduce((s,t)=>s+(t.grossPnl||t.pnl),0);
+    return{m,n:mt.length,pnl,gross,charges,w:mt.filter(t=>t.type==='win').length,l:mt.filter(t=>t.type==='loss').length};
   });
 }
 function renderMonthly(){
@@ -1102,7 +1264,9 @@ function renderMonthly(){
       <td style="font-family:'Space Mono',monospace;font-size:11px">${d.n||'—'}</td>
       <td style="color:var(--green);font-family:'Space Mono',monospace;font-size:11px">${d.n?d.w:'—'}</td>
       <td style="color:var(--red);font-family:'Space Mono',monospace;font-size:11px">${d.n?d.l:'—'}</td>
-      <td class="${d.pnl>=0?'pp':'pn'}">${d.n?fnum(d.pnl):'—'}</td>
+      <td class="${d.gross>=0?'pp':'pn'}" style="font-size:11px">${d.n?fnum(d.gross):'—'}</td>
+      <td style="color:var(--red);font-family:'Space Mono',monospace;font-size:11px">${d.n&&d.charges?'-'+d.charges.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+      <td class="${d.pnl>=0?'pp':'pn'}" style="font-weight:700">${d.n?fnum(d.pnl):'—'}</td>
       <td class="${(mRoi||0)>=0?'pp':'pn'}" style="font-family:'Space Mono',monospace;font-size:11px">${mRoi!==null?fp(mRoi):'—'}</td>
       <td class="${(rRoi||0)>=0?'pp':'pn'}" style="font-family:'Space Mono',monospace;font-size:11px;font-weight:700">${rRoi!==null?fp(rRoi):'—'}</td>
       <td style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted2)">${endBal?fbal(endBal):'—'}</td>
@@ -1789,6 +1953,8 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMonthModalDirec
 ══════════════════════════════════════ */
 
 let uploadParsedTrades = [];
+let uploadWipeStart = null;   // exact start date from Zerodha file header
+let uploadWipeEnd   = null;   // exact end date from Zerodha file header
 
 function uploadDragOver(e){
   e.preventDefault();
@@ -1821,6 +1987,8 @@ function showUploadMsg(msg, type){
 
 function resetUpload(){
   uploadParsedTrades = [];
+  uploadWipeStart = null;
+  uploadWipeEnd   = null;
   document.getElementById('upload-preview').classList.remove('show');
   document.getElementById('upload-progress').classList.remove('show');
   document.getElementById('upload-progress-bar').style.width='0%';
@@ -1920,7 +2088,8 @@ function parseZerodhaRows(rows, filename){
   console.log('[TradeLog] totalCharges:',totalCharges,'realizedPnL:',realizedPnL);
 
   // ── Find header row — look for Symbol + Buy Value + Realized P&L ──
-  let headerIdx=-1, colMap={symbol:-1,buy:-1,sell:-1,pnl:-1};
+  // colMap.unrealized tracks the unrealized P&L column so we can skip it
+  let headerIdx=-1, colMap={symbol:-1,buy:-1,sell:-1,pnl:-1,unrealized:-1,status:-1};
 
   for(let i=0;i<rows.length;i++){
     const row=rows[i].map(c=>String(c===null||c===undefined?'':c).toLowerCase().trim());
@@ -1930,14 +2099,18 @@ function parseZerodhaRows(rows, filename){
     // Find Buy Value column
     const bi = row.findIndex(h=>h==='buy value'||h==='buy_value'||h.replace(/\s+/g,'')=='buyvalue');
     if(bi===-1) continue;
-    // Find Realized P&L column
-    const pi = row.findIndex(h=>h==='realized p&l'||h==='realised p&l'||h==='p&l'||h.includes('realized p&l')||h.includes('realised p&l'));
+    // Find REALIZED P&L column — must match "realized" or "realised", NOT "unrealized"
+    const pi = row.findIndex(h=>(h==='realized p&l'||h==='realised p&l'||h==='p&l'||h.includes('realized p&l')||h.includes('realised p&l'))&&!h.includes('unrealized')&&!h.includes('unrealised'));
     if(pi===-1) continue;
     // Find Sell Value
     const sti = row.findIndex(h=>h==='sell value'||h==='sell_value'||h.replace(/\s+/g,'')=='sellvalue');
+    // Track unrealized column so we can detect open positions
+    const ui = row.findIndex(h=>h.includes('unrealized')||h.includes('unrealised'));
+    // Track status column (open/closed)
+    const statI = row.findIndex(h=>h==='status'||h==='trade status'||h==='position status');
 
     headerIdx=i;
-    colMap={symbol:si, buy:bi, sell:sti>-1?sti:bi+1, pnl:pi};
+    colMap={symbol:si, buy:bi, sell:sti>-1?sti:bi+1, pnl:pi, unrealized:ui, status:statI};
     console.log('[TradeLog] Header at row',i,'cols:',JSON.stringify(colMap));
     console.log('[TradeLog] Header row:',row);
     break;
@@ -1949,17 +2122,17 @@ function parseZerodhaRows(rows, filename){
     for(let i=0;i<rows.length;i++){
       const row=rows[i];
       if(!row||row.length<7) continue;
-      // Try each cell as potential symbol
       for(let j=0;j<Math.min(row.length,4);j++){
         const sym=String(row[j]===null||row[j]===undefined?'':row[j]).trim();
         if(!sym||sym.length<4) continue;
-        // Check if cells after it are numbers (buy value, sell value, pnl)
-        const v4=parseFloat(String(row[j+3]||'').replace(/,/g,''));
-        const v5=parseFloat(String(row[j+4]||'').replace(/,/g,''));
-        const v6=parseFloat(String(row[j+5]||'').replace(/,/g,''));
-        if(!isNaN(v4)&&v4>0&&!isNaN(v5)&&!isNaN(v6)){
+        const v3=parseFloat(String(row[j+3]||'').replace(/,/g,''));
+        const v4=parseFloat(String(row[j+4]||'').replace(/,/g,''));
+        // j+5 is typically Realized P&L, j+6 Unrealized — use j+5 explicitly
+        const v5=parseFloat(String(row[j+5]||'').replace(/,/g,''));
+        if(!isNaN(v3)&&v3>0&&!isNaN(v4)&&!isNaN(v5)){
           headerIdx=i-1;
-          colMap={symbol:j, buy:j+3, sell:j+4, pnl:j+5};
+          // pnl = j+5 (Realized), unrealized = j+6
+          colMap={symbol:j, buy:j+3, sell:j+4, pnl:j+5, unrealized:j+6, status:-1};
           console.log('[TradeLog] Positional fallback at row',i,'sym:',sym,'colMap:',JSON.stringify(colMap));
           break;
         }
@@ -1974,21 +2147,44 @@ function parseZerodhaRows(rows, filename){
     throw new Error('Could not find trade data. Open browser console (Cmd+Option+J) to see file structure and share with support.');
   }
 
-  // ── Parse trade rows ──
+  // ── Parse trade rows — REALIZED only, skip open/unrealized positions ──
   const rawTrades=[];
+  let skippedUnrealized=0;
   for(let i=headerIdx+1;i<rows.length;i++){
     const row=rows[i];
     if(!row||row.length<=colMap.pnl) continue;
     const symbol=String(row[colMap.symbol]===null||row[colMap.symbol]===undefined?'':row[colMap.symbol]).trim();
-    if(!symbol||symbol===''||symbol.toLowerCase()==='symbol'||symbol.toLowerCase()==='scrip') continue;
+    if(!symbol||symbol===''||symbol.toLowerCase()==='symbol'||symbol.toLowerCase()==='scrip'||symbol.toLowerCase()==='instrument') continue;
+
+    // Skip header-like repeat rows
+    if(symbol.toLowerCase()==='total'||symbol.toLowerCase()==='sub total'||symbol.toLowerCase()==='subtotal') continue;
+
+    // Skip if status column says "open"
+    if(colMap.status>-1){
+      const statusVal=String(row[colMap.status]||'').toLowerCase().trim();
+      if(statusVal==='open'||statusVal==='active'||statusVal==='running'){skippedUnrealized++;continue;}
+    }
+
     const buy=parseFloat(String(row[colMap.buy]===null||row[colMap.buy]===undefined?'0':row[colMap.buy]).replace(/,/g,''))||0;
     const sell=parseFloat(String(row[colMap.sell]===null||row[colMap.sell]===undefined?'0':row[colMap.sell]).replace(/,/g,''))||0;
+
+    // A trade is OPEN (unrealized) if it has buy value but zero sell, or sell but zero buy
+    // Only skip if sell==0 (bought but not yet sold) or buy==0 (short not yet covered)
+    // Exception: some F&O expiries settle with sell=0 but realized pnl set — only skip if unrealized col has a value
+    if(colMap.unrealized>-1){
+      const unrVal=parseFloat(String(row[colMap.unrealized]||'').replace(/,/g,''));
+      const realVal=parseFloat(String(row[colMap.pnl]||'').replace(/,/g,''));
+      // If unrealized has a value and realized is 0/blank → open position, skip
+      if(!isNaN(unrVal)&&unrVal!==0&&(isNaN(realVal)||realVal===0)){skippedUnrealized++;continue;}
+    }
+
     const pnlRaw=String(row[colMap.pnl]===null||row[colMap.pnl]===undefined?'':row[colMap.pnl]).replace(/,/g,'');
     const pnl=parseFloat(pnlRaw);
     if(isNaN(pnl)) continue;
     if(buy===0&&sell===0&&pnl===0) continue;
     rawTrades.push({symbol,buy,sell,pnl});
   }
+  if(skippedUnrealized>0) console.log('[TradeLog] Skipped',skippedUnrealized,'open/unrealized positions');
 
   console.log('[TradeLog] Found',rawTrades.length,'trades');
   if(!rawTrades.length){
@@ -2003,41 +2199,58 @@ function parseZerodhaRows(rows, filename){
 
   const cap=getCapital()||1000000;
   const now=new Date();
-  let baseYear=now.getFullYear(), baseMonth=now.getMonth();
-  
-  // First try to find date range inside the Excel rows (most reliable)
-  // Zerodha puts: "P&L Statement for F&O from 2026-04-01 to 2026-04-29"
+
+  // ── Extract EXACT start and end dates from Zerodha header ──
+  // Zerodha format: "P&L Statement for F&O from 2026-04-01 to 2026-04-30"
+  // We MUST use these exact dates — the file may cover a partial month (e.g. May 14–20)
+  let rangeStart=null, rangeEnd=null;
   for(let i=0;i<Math.min(rows.length,20);i++){
     const row=rows[i].map(c=>String(c===null||c===undefined?'':c).trim());
     for(let j=0;j<row.length;j++){
       const cell=row[j];
-      // Match "from YYYY-MM-DD" pattern
-      const m=cell.match(/from\s+(\d{4})-(\d{2})-(\d{2})/i);
+      const m=cell.match(/from\s+(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})/i);
       if(m){
-        baseYear=parseInt(m[1]);
-        baseMonth=parseInt(m[2])-1;
-        console.log('[TradeLog] Date from Excel header:',baseYear,baseMonth+1);
+        rangeStart=new Date(m[1]+'T00:00:00');
+        rangeEnd=new Date(m[2]+'T23:59:59');
+        console.log('[TradeLog] Exact date range from Excel header:',m[1],'→',m[2]);
         break;
       }
     }
+    if(rangeStart) break;
   }
-  
-  // Fallback: try filename pattern like 2026-04 or Apr-2026
-  if(baseYear===now.getFullYear()&&baseMonth===now.getMonth()){
+
+  // Fallback: try filename pattern like 2026-04 (assume full month)
+  if(!rangeStart){
     const dm=filename.match(/(\d{4})[_\-](\d{2})/);
-    if(dm){baseYear=parseInt(dm[1]);baseMonth=parseInt(dm[2])-1;}
+    if(dm){
+      const y=parseInt(dm[1]),mo=parseInt(dm[2])-1;
+      rangeStart=new Date(y,mo,1);
+      rangeEnd=new Date(y,mo+1,0,23,59,59);
+      console.log('[TradeLog] Date range from filename fallback:',rangeStart,'→',rangeEnd);
+    }
   }
-  const daysInMonth=new Date(baseYear,baseMonth+1,0).getDate();
-  const step=Math.max(1,Math.floor(daysInMonth/rawTrades.length));
+
+  // Last resort: current month
+  if(!rangeStart){
+    rangeStart=new Date(now.getFullYear(),now.getMonth(),1);
+    rangeEnd=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59);
+    console.log('[TradeLog] Date range fallback: current month');
+  }
+
+  // ── Assign trade dates: spread evenly within exact file date range ──
+  // Simple and reliable — no symbol parsing that can overshoot past rangeEnd
+  const rangeDays=Math.max(1,Math.round((rangeEnd-rangeStart)/86400000));
 
   uploadParsedTrades=rawTrades.map((t,i)=>{
     const charges=totalTurnover>0?parseFloat((totalCharges*(t.buy+t.sell)/totalTurnover).toFixed(2)):0;
     const netPnl=parseFloat((t.pnl-charges).toFixed(2));
     const type=netPnl>=0?'win':'loss';
     const roi=parseFloat((netPnl/cap*100).toFixed(4));
-    const day=Math.min(1+i*step,daysInMonth);
-    const tradeDate=new Date(baseYear,baseMonth,day,9,15,i);
     const sym=t.symbol.toUpperCase();
+    // offset: 0 for first trade, up to (rangeDays-1) for last — always within range
+    const offset=Math.floor((i/rawTrades.length)*rangeDays);
+    const tradeDate=new Date(rangeStart.getTime()+offset*86400000);
+    tradeDate.setHours(9,15,i%60,0);
     const market=sym.includes('FUT')?'Futures':sym.match(/\d+(CE|PE)$/)?'Options':'Stocks';
     const noteTime=tradeDate.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
     return{
@@ -2049,6 +2262,11 @@ function parseZerodhaRows(rows, filename){
     };
   });
 
+  // Store range in module-level variables so confirmUploadImport can safely read them
+  uploadWipeStart = rangeStart;
+  uploadWipeEnd   = rangeEnd;
+  console.log('[TradeLog] uploadWipeStart=',rangeStart.toISOString(),'uploadWipeEnd=',rangeEnd.toISOString());
+
   renderUploadPreview(totalCharges, realizedPnL, filename);
 }
 
@@ -2058,12 +2276,14 @@ function renderUploadPreview(totalCharges, realizedPnL, period){
   const totalNet = uploadParsedTrades.reduce((s,t)=>s+t.pnl,0);
   const totalGross = uploadParsedTrades.reduce((s,t)=>s+t.grossPnl,0);
 
-  // Check for duplicates
+  // Show exactly what will be wiped based on the file's date range
   let existing = [];
   try{ existing = JSON.parse(localStorage.getItem('tl_v5')||'[]'); }catch(e){}
-  const existingIds = new Set(existing.map(t=>t.id));
-  const newCount = uploadParsedTrades.filter(t=>!existingIds.has(t.id)).length;
-  const dupCount = uploadParsedTrades.length - newCount;
+  const wipeStart = uploadWipeStart;
+  const wipeEnd   = uploadWipeEnd;
+  const replaceCount = wipeStart ? existing.filter(t=>{
+    const d=new Date(t.date); return d>=wipeStart && d<=wipeEnd;
+  }).length : 0;
 
   document.getElementById('upload-summary-strip').innerHTML=`
     <div class="ups-item"><div class="ups-label">Gross P&L</div><div class="ups-val ${totalGross>=0?'pos':'neg'}">${totalGross>=0?'+':''}${totalGross.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
@@ -2074,8 +2294,14 @@ function renderUploadPreview(totalCharges, realizedPnL, period){
     <div class="ups-item"><div class="ups-label">Win Rate</div><div class="ups-val">${uploadParsedTrades.length?(wins.length/uploadParsedTrades.length*100).toFixed(1)+'%':'—'}</div></div>
   `;
 
-  if(dupCount > 0){
-    showUploadMsg(`⚠️ ${dupCount} duplicate trade${dupCount!==1?'s':''} detected and will be skipped. ${newCount} new trades will be imported.`, 'warn');
+  if(wipeStart){
+    const fmt=d=>d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+    const rangeLabel=`${fmt(wipeStart)} – ${fmt(wipeEnd)}`;
+    if(replaceCount>0){
+      showUploadMsg(`ℹ️ All ${replaceCount} entr${replaceCount!==1?'ies':'y'} between ${rangeLabel} will be wiped and replaced with this Zerodha statement (realized trades only).`, 'warn');
+    } else {
+      showUploadMsg(`ℹ️ Will import ${uploadParsedTrades.length} realized trade${uploadParsedTrades.length!==1?'s':''} for ${rangeLabel}. No existing entries in this range.`, 'warn');
+    }
   }
 
   document.getElementById('upload-trade-list').innerHTML =
@@ -2091,33 +2317,77 @@ function renderUploadPreview(totalCharges, realizedPnL, period){
       </div>`).join('');
 
   const btn = document.getElementById('upload-confirm-btn');
-  btn.textContent = `Import ${newCount} Trade${newCount!==1?'s':''}`;
-  btn.disabled = newCount === 0;
+  const totalCount = uploadParsedTrades.length;
+  btn.textContent = `Import ${totalCount} Trade${totalCount!==1?'s':''}`;
+  btn.disabled = totalCount === 0;
 
   document.getElementById('upload-preview').classList.add('show');
   document.getElementById('upload-progress').classList.remove('show');
 }
 
 function confirmUploadImport(){
-  // Merge with current trades (already loaded from server into trades[])
-  const existingIds = new Set(trades.map(t=>t.id));
-  const newTrades = uploadParsedTrades.filter(t=>!existingIds.has(t.id));
-  
-  // Add to global trades array
-  trades = [...newTrades, ...trades].sort((a,b)=>new Date(b.date)-new Date(a.date));
-  
-  // Save to server AND localStorage
+  if(!uploadParsedTrades.length){showUploadMsg('Nothing to import.','err');return;}
+
+  // ── Determine exact wipe range from the Zerodha file header ──
+  let wipeStart = uploadWipeStart;
+  let wipeEnd   = uploadWipeEnd;
+
+  // Safety fallback
+  if(!wipeStart || !wipeEnd){
+    const dates = uploadParsedTrades.map(t=>new Date(t.date));
+    wipeStart = new Date(Math.min(...dates)); wipeEnd = new Date(Math.max(...dates));
+    wipeStart.setHours(0,0,0,0); wipeEnd.setHours(23,59,59,999);
+  }
+
+  console.log('[TradeLog] Wiping trades from',wipeStart.toISOString(),'to',wipeEnd.toISOString());
+
+  // ── Reload from localStorage to get true current state ──
+  try{ const r=localStorage.getItem(SK); if(r) trades=JSON.parse(r); }catch(e){ trades=[]; }
+
+  // ── Build set of tickers in this upload (to catch orphans with wrong dates) ──
+  const uploadTickers = new Set(uploadParsedTrades.map(t=>t.ticker));
+
+  // ── Wipe: remove trades that are EITHER in the date range OR same ticker as upload ──
+  // The ticker match catches old trades that were assigned wrong dates (e.g. May 22-29)
+  // from a previous buggy import of the same file
+  const before = trades.length;
+  trades = trades.filter(t=>{
+    const d = new Date(t.date);
+    const inRange = d >= wipeStart && d <= wipeEnd;
+    const sameTickerFromThisFile = uploadTickers.has(t.ticker);
+    return !inRange && !sameTickerFromThisFile;
+  });
+  const wipedCount = before - trades.length;
+  console.log('[TradeLog] Wiped',wipedCount,'trades, importing',uploadParsedTrades.length);
+
+  // ── Insert fresh trades ──
+  trades = [...uploadParsedTrades, ...trades].sort((a,b)=>new Date(b.date)-new Date(a.date));
+
   save();
-  
-  showUploadMsg(`✅ ${newTrades.length} trade${newTrades.length!==1?'s':''} imported!`, 'ok');
-  
+
+  const fmt=d=>d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+  showUploadMsg(
+    `✅ ${uploadParsedTrades.length} realized trade${uploadParsedTrades.length!==1?'s':''} imported for ${fmt(wipeStart)} – ${fmt(wipeEnd)}.`
+    + (wipedCount>0 ? ` ${wipedCount} previous entr${wipedCount!==1?'ies':'y'} replaced.` : ''),
+    'ok'
+  );
+
   const btn = document.getElementById('upload-confirm-btn');
   btn.textContent = 'Imported!';
   btn.disabled = true;
-  
   uploadParsedTrades = [];
-  setTimeout(()=>{ resetUpload(); }, 2000);
+  setTimeout(()=>{ resetUpload(); }, 2500);
   renderAll();
+}
+
+function downloadApp(){
+  const html = document.documentElement.outerHTML;
+  const blob = new Blob([html], {type:'text/html'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'index.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function stt(e,txt){const t=document.getElementById('tt');t.textContent=txt;t.style.opacity='1';t.style.left=(e.clientX+12)+'px';t.style.top=(e.clientY-30)+'px'}
